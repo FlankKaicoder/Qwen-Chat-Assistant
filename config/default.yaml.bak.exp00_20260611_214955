@@ -6,15 +6,15 @@ paths:
   capture_script: /home/cat/ai/qwen3vl2b/scripts/capture-photo.sh
 
 audio:
-  mic_device: plughw:2,0
-  speaker_device: plughw:2,0
+  mic_device: plughw:4,0
+  speaker_device: plughw:4,0
   playback_channels: 2
   playback_sample_rate: 44100
   playback_mode: stereo_dup
   sample_rate: 16000
   channels: 2
   input_channel: left
-  mixer_card: 2
+  mixer_card: 4
   capture_channel_gain: 8
   wake_input_gain: 8.0
   asr_input_gain: 5.0
