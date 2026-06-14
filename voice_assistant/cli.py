@@ -4,10 +4,6 @@ import argparse
 import sys
 from pathlib import Path
 
-from .config import load_config
-from .orchestrator import VoiceAssistant
-from .streaming_tts import StreamingTtsPlayer
-
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Local Chinese voice-photo Qwen assistant")
@@ -63,8 +59,130 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _record_without_heavy_import(args: argparse.Namespace) -> None:
+    """Lightweight record command.
+
+    目的：
+    record 子命令只验证录音链路，不应该提前导入 ASR / Qwen / TTS。
+    因此这里不导入 orchestrator.py，也不依赖 sherpa_onnx。
+    """
+    import subprocess
+    import wave
+    import yaml
+
+    config_path = Path(args.config) if args.config else Path("config/default.yaml")
+    cfg = yaml.safe_load(config_path.read_text())
+    audio = cfg.get("audio", {})
+
+    mic_device = str(audio.get("mic_device", "plughw:2,0"))
+    sample_rate = int(audio.get("sample_rate", 16000))
+    channels = int(audio.get("channels", 1))
+    input_channel = str(audio.get("input_channel", "left"))
+    gain = float(audio.get("asr_input_gain", 1.0))
+
+    seconds = int(args.seconds) if args.seconds is not None else int(audio.get("command_seconds", 5))
+
+    if args.out:
+        out = Path(args.out)
+    else:
+        out = Path(cfg.get("paths", {}).get("temp_dir", "/tmp/qwen_voice_assistant")) / "command.wav"
+
+    out.parent.mkdir(parents=True, exist_ok=True)
+    raw = out.with_name(out.stem + ".raw_capture.wav")
+
+    print("========== lightweight record ==========")
+    print("config       :", config_path)
+    print("mic_device   :", mic_device)
+    print("sample_rate  :", sample_rate)
+    print("channels     :", channels)
+    print("input_channel:", input_channel)
+    print("asr_gain     :", gain)
+    print("seconds      :", seconds)
+    print("raw          :", raw)
+    print("out          :", out)
+
+    cmd = [
+        "arecord",
+        "-D", mic_device,
+        "-f", "S16_LE",
+        "-r", str(sample_rate),
+        "-c", str(channels),
+        "-d", str(seconds),
+        str(raw),
+    ]
+    print("[CMD]", " ".join(cmd), flush=True)
+    subprocess.run(cmd, check=True)
+
+    if channels == 1:
+        if gain != 1.0:
+            cmd = [
+                "ffmpeg", "-y", "-hide_banner",
+                "-i", str(raw),
+                "-af", f"volume={gain}",
+                "-ar", str(sample_rate),
+                "-ac", "1",
+                str(out),
+            ]
+            print("[CMD]", " ".join(cmd), flush=True)
+            subprocess.run(cmd, check=True)
+        else:
+            raw.replace(out)
+    else:
+        if input_channel.lower() in ("left", "l", "0"):
+            pan = "mono|c0=c0"
+        elif input_channel.lower() in ("right", "r", "1"):
+            pan = "mono|c0=c1"
+        else:
+            print(f"[WARN] unknown input_channel={input_channel}, fallback to left")
+            pan = "mono|c0=c0"
+
+        cmd = [
+            "ffmpeg", "-y", "-hide_banner",
+            "-i", str(raw),
+            "-af", f"pan={pan},volume={gain}",
+            "-ar", str(sample_rate),
+            "-ac", "1",
+            str(out),
+        ]
+        print("[CMD]", " ".join(cmd), flush=True)
+        subprocess.run(cmd, check=True)
+
+    with wave.open(str(out), "rb") as w:
+        print("========== output wav ==========")
+        print("path        :", out)
+        print("channels    :", w.getnchannels())
+        print("sample_rate :", w.getframerate())
+        print("sample_width:", w.getsampwidth())
+        print("frames      :", w.getnframes())
+        print("duration_s  :", round(w.getnframes() / float(w.getframerate()), 3))
+
+    print(out)
+
+
 def main() -> None:
     args = build_parser().parse_args()
+
+    # 关键修复：
+    # record 命令提前处理，不构造 VoiceAssistant，
+    # 避免导入 orchestrator -> asr -> sherpa_onnx。
+    if args.cmd == "record":
+        _record_without_heavy_import(args)
+        return
+
+    # Lightweight STT: do not construct the full VoiceAssistant.
+    # stt only needs config + SherpaAsr. It must not import Qwen/TTS/KWS.
+    if args.cmd == "stt":
+        from .asr import SherpaAsr
+        from .config import load_config
+
+        config = load_config(args.config)
+        text = SherpaAsr(config).transcribe_wav(args.wav)
+        print(text)
+        return
+
+    from .config import load_config
+    from .orchestrator import VoiceAssistant
+
     assistant = VoiceAssistant(load_config(args.config))
 
     try:
@@ -74,7 +192,7 @@ def main() -> None:
         raise SystemExit(130) from None
 
 
-def _run_command(args: argparse.Namespace, assistant: VoiceAssistant) -> None:
+def _run_command(args: argparse.Namespace, assistant) -> None:
     if args.cmd == "record":
         out = Path(args.out) if args.out else assistant.temp_dir / "command.wav"
         wav = assistant.record_command(args.seconds)
@@ -86,6 +204,8 @@ def _run_command(args: argparse.Namespace, assistant: VoiceAssistant) -> None:
     elif args.cmd == "stt":
         print(assistant.transcribe_wav(args.wav))
     elif args.cmd == "tts-stream":
+        from .streaming_tts import StreamingTtsPlayer
+
         player = StreamingTtsPlayer(assistant.config)
         try:
             player.enqueue(args.text)

@@ -19,6 +19,9 @@ __pycache__/
 *.mp4
 *.log
 
+#output folder
+output/
+
 # Local captured photos are stored outside this repository by default.
 # Keep demo.jpg tracked as the placeholder image.
 
