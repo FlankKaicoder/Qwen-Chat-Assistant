@@ -159,6 +159,48 @@ def _record_without_heavy_import(args: argparse.Namespace) -> None:
     print(out)
 
 
+
+def _ask_without_heavy_import(args: argparse.Namespace) -> None:
+    """Lightweight ask command.
+
+    目的：
+    ask --no-speak --no-play 只验证 QwenRunner / Qwen3-VL 推理链路，
+    不应该提前构造完整 VoiceAssistant，
+    也不应该导入 orchestrator -> asr -> sherpa_onnx。
+    """
+    from .config import load_config
+    from .qwen_runner import QwenRunner
+
+    config = load_config(args.config)
+    qwen = config.get("qwen", {})
+    paths = config.get("paths", {})
+
+    image_path = args.image
+
+    if args.force_photo:
+        from .camera import CameraAdapter
+        image_path = str(CameraAdapter(config).capture())
+
+    if not image_path:
+        image_path = paths.get("placeholder_image", "demo.jpg")
+
+    text = args.text
+
+    # 当前 demo 的图像触发标记是 <image>。
+    # 当用户显式传入 --image 或 --force-photo 时，如果文本里还没有 <image>，
+    # 这里自动补上，避免图像没有真正被模型使用。
+    marker = qwen.get("demo_image_marker", "<image>")
+    if (args.image or args.force_photo) and marker and marker not in text:
+        text = marker + text
+
+    print("========== lightweight ask ==========")
+    print("image :", image_path)
+    print("text  :", text)
+    print()
+
+    answer = QwenRunner(config).ask(image_path, text)
+    print(answer)
+
 def main() -> None:
     args = build_parser().parse_args()
 
@@ -178,6 +220,13 @@ def main() -> None:
         config = load_config(args.config)
         text = SherpaAsr(config).transcribe_wav(args.wav)
         print(text)
+        return
+
+    # Lightweight ASK:
+    # ask --no-speak --no-play 只验证 QwenRunner，不构造完整助手，
+    # 避免导入 orchestrator -> asr -> sherpa_onnx。
+    if args.cmd == "ask" and args.no_speak and args.no_play:
+        _ask_without_heavy_import(args)
         return
 
     from .config import load_config

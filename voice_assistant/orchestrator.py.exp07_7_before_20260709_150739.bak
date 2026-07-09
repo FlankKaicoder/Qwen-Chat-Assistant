@@ -79,17 +79,22 @@ class VoiceAssistant:
         speak: bool = True,
         play: bool = True,
     ) -> str:
-        answer = self.ask_qwen(text, image_path=image_path, force_photo=force_photo)
-
         if speak and play:
-            print("将使用整段 TTS：先得到完整 Qwen 回答，再合成并播放。", flush=True)
+            print("将使用流式 TTS：Qwen 每生成一句就直接写入喇叭 PCM 播放。", flush=True)
             player = StreamingTtsPlayer(self.config)
             try:
-                player.enqueue(answer)
+                ack_text = str(self.config["models"]["tts"].get("ack_text", "")).strip()
+                if ack_text:
+                    player.enqueue(ack_text)
+                return self.ask_qwen(
+                    text,
+                    image_path=image_path,
+                    force_photo=force_photo,
+                    on_sentence=player.enqueue,
+                )
             finally:
                 player.close()
-
-        return answer
+        return self.ask_qwen(text, image_path=image_path, force_photo=force_photo)
 
     def run_once_from_microphone(self, seconds: int | None = None, *, speak: bool = True, play: bool = True) -> str:
         command_wav = self.record_command(seconds)
