@@ -55,6 +55,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-speak", action="store_true")
     p.add_argument("--no-play", action="store_true")
 
+    p = sub.add_parser(
+        "listen-controlled",
+        help="Stable KWS -> record -> ASR -> Qwen/TTS session with debug artifacts",
+    )
+    p.add_argument("--wake-mode", choices=["kws", "stt"], default="kws")
+    p.add_argument("--wake-timeout", type=int, default=25)
+    p.add_argument("--seconds", type=int, default=5)
+    p.add_argument("--prepare-delay", type=float, default=0.8)
+    p.add_argument("--skip-wake", action="store_true")
+    p.add_argument("--out-dir")
+    p.add_argument("--no-speak", action="store_true")
+    p.add_argument("--no-play", action="store_true")
+
     sub.add_parser("cleanup", help="Clean temporary files")
     return parser
 
@@ -299,6 +312,11 @@ def _run_command(args: argparse.Namespace, assistant) -> None:
             speak=not args.no_speak,
             play=not args.no_play,
         )
+    elif args.cmd == "listen-controlled":
+        from .controlled_session import run_controlled_session
+
+        raise SystemExit(run_controlled_session(assistant, args))
+
     elif args.cmd == "cleanup":
         assistant.cleanup_temp()
 

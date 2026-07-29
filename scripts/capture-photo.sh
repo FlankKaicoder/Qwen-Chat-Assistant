@@ -2,10 +2,10 @@
 set -euo pipefail
 
 device="/dev/video11"
-width="1920"
-height="1080"
+width="1280"
+height="720"
 pixfmt="NV12"
-skip="30"
+skip="5"
 out_dir="/home/cat/图片"
 prefix="camera"
 timestamp=""
