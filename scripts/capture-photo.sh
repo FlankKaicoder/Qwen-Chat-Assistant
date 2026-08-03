@@ -15,14 +15,14 @@ usage() {
 Usage: capture-photo.sh [options]
 
 Capture one still frame from the LubanCat IMX415 camera using the known working
-1080p NV12 pipeline, then convert it to JPG.
+NV12 camera pipeline, then convert it to JPG.
 
 Options:
   --device PATH     V4L2 capture node (default: /dev/video11)
-  --width N         Capture width (default: 1920)
-  --height N        Capture height (default: 1080)
+  --width N         Capture width (default: 1280)
+  --height N        Capture height (default: 720)
   --pixfmt FOURCC   Pixel format (default: NV12)
-  --skip N          Frames to skip before saving (default: 30)
+  --skip N          Frames to skip before saving (default: 5)
   --out-dir DIR     Directory for outputs (default: /home/cat/图片)
   --prefix NAME     Output filename prefix (default: camera)
   --timestamp TS    Use explicit timestamp instead of date +%Y%m%d_%H%M%S
@@ -114,13 +114,45 @@ case "$pixfmt" in
     ;;
 esac
 
-ffmpeg -y \
-  -f rawvideo \
-  -pix_fmt "$ff_pixfmt" \
-  -s "${width}x${height}" \
-  -i "$raw_path" \
-  -frames:v 1 \
-  "$jpg_path" >/dev/null 2>&1
+ffmpeg_stderr="${base}_ffmpeg.stderr.log"
+
+set +e
+
+timeout --signal=TERM --kill-after=2 10 \
+  ffmpeg \
+    -nostdin \
+    -hide_banner \
+    -loglevel error \
+    -y \
+    -f rawvideo \
+    -pixel_format "$ff_pixfmt" \
+    -video_size "${width}x${height}" \
+    -framerate 1 \
+    -i "$raw_path" \
+    -frames:v 1 \
+    -q:v 2 \
+    "$jpg_path" \
+    >/dev/null \
+    2>"$ffmpeg_stderr"
+
+ffmpeg_rc=$?
+
+set -e
+
+if [ "$ffmpeg_rc" -ne 0 ]; then
+  echo "FFmpeg conversion failed, return code: $ffmpeg_rc" >&2
+  echo "raw_path: $raw_path" >&2
+  echo "jpg_path: $jpg_path" >&2
+
+  if [ -s "$ffmpeg_stderr" ]; then
+    echo "FFmpeg stderr:" >&2
+    cat "$ffmpeg_stderr" >&2
+  fi
+
+  exit "$ffmpeg_rc"
+fi
+
+rm -f "$ffmpeg_stderr"
 
 raw_size="$(stat -c '%s' "$raw_path")"
 

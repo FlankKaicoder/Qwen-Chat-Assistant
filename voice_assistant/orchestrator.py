@@ -46,21 +46,45 @@ class VoiceAssistant:
         image_path: str | Path | None = None,
         force_photo: bool = False,
         on_sentence=None,
+        max_new_tokens=None,
+        need_photo_override=None,
     ) -> str:
-        intent = self.intent.analyze(text)
-        uses_photo = force_photo or intent.need_photo
+        if need_photo_override is None:
+            intent = self.intent.analyze(text)
+            uses_photo = force_photo or intent.need_photo
+            routed_qwen_text = intent.qwen_text
+        else:
+            uses_photo = (
+                force_photo
+                or bool(need_photo_override)
+            )
+            routed_qwen_text = text
+
         if uses_photo:
             print("检测到拍照意图，正在拍照...", flush=True)
             image = self.capture_photo()
             print(f"照片已保存：{image}", flush=True)
         else:
             image = Path(image_path or self.config["paths"]["placeholder_image"])
-        qwen_text = self._prepare_qwen_text(intent.qwen_text, uses_photo)
+        qwen_text = self._prepare_qwen_text(
+            routed_qwen_text,
+            uses_photo,
+        )
         print("正在调用 Qwen demo，请等待模型回答...", flush=True)
         runner = QwenRunner(self.config)
         if on_sentence is not None:
-            return runner.ask_stream(image, qwen_text, on_sentence=on_sentence)
-        return runner.ask(image, qwen_text)
+            return runner.ask_stream(
+                image,
+                qwen_text,
+                on_sentence=on_sentence,
+                max_new_tokens=max_new_tokens,
+            )
+
+        return runner.ask(
+            image,
+            qwen_text,
+            max_new_tokens=max_new_tokens,
+        )
 
     def _prepare_qwen_text(self, qwen_text: str, uses_photo: bool) -> str:
         marker = str(self.config["qwen"].get("demo_image_marker", "<image>"))
@@ -78,8 +102,16 @@ class VoiceAssistant:
         force_photo: bool = False,
         speak: bool = True,
         play: bool = True,
+        max_new_tokens=None,
+        need_photo_override=None,
     ) -> str:
-        answer = self.ask_qwen(text, image_path=image_path, force_photo=force_photo)
+        answer = self.ask_qwen(
+            text,
+            image_path=image_path,
+            force_photo=force_photo,
+            max_new_tokens=max_new_tokens,
+            need_photo_override=need_photo_override,
+        )
 
         if speak and play:
             print("将使用整段 TTS：先得到完整 Qwen 回答，再合成并播放。", flush=True)

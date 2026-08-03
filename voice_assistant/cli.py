@@ -67,6 +67,24 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--out-dir")
     p.add_argument("--no-speak", action="store_true")
     p.add_argument("--no-play", action="store_true")
+    p.add_argument(
+        "--answer-mode",
+        choices=["normal", "concise"],
+        default="normal",
+        help="Use normal or concise Qwen response prompt",
+    )
+    p.add_argument(
+        "--answer-max-chars",
+        type=int,
+        default=80,
+        help="Suggested maximum Chinese characters in concise mode",
+    )
+    p.add_argument(
+        "--concise-max-new-tokens",
+        type=int,
+        default=128,
+        help="Qwen generation token limit used by concise mode",
+    )
 
     sub.add_parser("cleanup", help="Clean temporary files")
     return parser

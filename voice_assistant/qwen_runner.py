@@ -16,8 +16,16 @@ class QwenRunner:
         self.project_dir = Path(config["paths"]["project_dir"])
         self.qwen = config["qwen"]
 
-    def ask(self, image_path: str | Path, text: str) -> str:
-        child = self._spawn(image_path)
+    def ask(
+        self,
+        image_path: str | Path,
+        text: str,
+        max_new_tokens=None,
+    ) -> str:
+        child = self._spawn(
+            image_path,
+            max_new_tokens=max_new_tokens,
+        )
         try:
             self._expect(child, "user:", int(self.qwen.get("load_timeout", 300)), "initial user prompt")
             child.sendline(text)
@@ -29,8 +37,17 @@ class QwenRunner:
         finally:
             self._close_child(child)
 
-    def ask_stream(self, image_path: str | Path, text: str, on_sentence: Callable[[str], None]) -> str:
-        child = self._spawn(image_path)
+    def ask_stream(
+        self,
+        image_path: str | Path,
+        text: str,
+        on_sentence: Callable[[str], None],
+        max_new_tokens=None,
+    ) -> str:
+        child = self._spawn(
+            image_path,
+            max_new_tokens=max_new_tokens,
+        )
         sentence_buffer = _SentenceBuffer(
             on_sentence=on_sentence,
             soft_limit=int(self.qwen.get("stream_sentence_chars", 80)),
@@ -82,18 +99,34 @@ class QwenRunner:
         finally:
             self._close_child(child)
 
-    def _spawn(self, image_path: str | Path) -> pexpect.spawn:
+    def _spawn(
+        self,
+        image_path: str | Path,
+        max_new_tokens=None,
+    ) -> pexpect.spawn:
         env = os.environ.copy()
         current_ld = env.get("LD_LIBRARY_PATH", "")
         env["LD_LIBRARY_PATH"] = f"{self.project_dir}:{current_ld}" if current_ld else str(self.project_dir)
         env.setdefault("RKLLM_LOG_LEVEL", "1")
+
+        if max_new_tokens is None:
+            effective_max_new_tokens = int(
+                self.qwen["max_new_tokens"]
+            )
+        else:
+            effective_max_new_tokens = int(max_new_tokens)
+
+        if effective_max_new_tokens <= 0:
+            raise ValueError(
+                "max_new_tokens must be greater than zero"
+            )
 
         args = [
             str(self.qwen["demo"]),
             str(image_path),
             str(self.qwen["vision_model"]),
             str(self.qwen["llm_model"]),
-            str(self.qwen["max_new_tokens"]),
+            str(effective_max_new_tokens),
             str(self.qwen["max_context_len"]),
             str(self.qwen["rknn_core_num"]),
             str(self.qwen["img_start"]),

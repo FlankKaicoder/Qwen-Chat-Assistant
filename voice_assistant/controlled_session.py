@@ -161,6 +161,46 @@ def _photo_intent_hint(text: str) -> bool:
     return any(keyword in text for keyword in keywords)
 
 
+def _is_identity_question(text: str) -> bool:
+    normalized = "".join(text.strip().split())
+
+    identity_phrases = (
+        "你是谁",
+        "你是什么",
+        "你叫什么",
+        "介绍一下你自己",
+        "介绍你自己",
+        "你能做什么",
+        "你的功能",
+    )
+
+    return any(
+        phrase in normalized
+        for phrase in identity_phrases
+    )
+
+
+def _build_concise_text_prompt(
+    recognized_text: str,
+    answer_max_chars: int,
+) -> str:
+    if _is_identity_question(recognized_text):
+        return (
+            "请直接回答用户的身份询问。"
+            "说明你是运行在RK3588设备上的"
+            "本地中文语音助手，"
+            "可以进行普通问答和摄像头画面描述。"
+            "不要声称你只能回答RK3588相关问题，"
+            "不要使用标题、列表或分点，"
+            "只输出一到两句自然中文，"
+            f"尽量控制在{answer_max_chars}个汉字以内。"
+        )
+
+    return (
+        "请简短回答这个问题："
+        f"{recognized_text}"
+    )
+
 def _format_optional_float(value: Any) -> str:
     if value is None:
         return ""
@@ -186,6 +226,10 @@ def _write_summary(out_dir: Path, summary: dict[str, Any]) -> None:
         "skip_wake",
         "prepare_delay",
         "record_seconds",
+        "answer_mode",
+        "answer_max_chars",
+        "qwen_prompt_chars",
+        "qwen_max_new_tokens",
         "command_wav",
         "audio_duration_seconds",
         "mean_volume_dbfs",
@@ -196,6 +240,8 @@ def _write_summary(out_dir: Path, summary: dict[str, Any]) -> None:
         "new_photo_count",
         "new_photo_path",
         "answer_chars",
+        "pipeline_elapsed_seconds",
+        "tts_elapsed_seconds",
         "speak",
         "play",
         "elapsed_seconds",
@@ -211,6 +257,8 @@ def _write_summary(out_dir: Path, summary: dict[str, Any]) -> None:
             "audio_duration_seconds",
             "mean_volume_dbfs",
             "max_volume_dbfs",
+            "pipeline_elapsed_seconds",
+            "tts_elapsed_seconds",
             "elapsed_seconds",
         }:
             value = _format_optional_float(value)
@@ -260,6 +308,12 @@ def run_controlled_session(assistant: Any, args: Any) -> int:
         "skip_wake": int(bool(args.skip_wake)),
         "prepare_delay": float(args.prepare_delay),
         "record_seconds": int(args.seconds),
+        "answer_mode": str(args.answer_mode),
+        "answer_max_chars": int(args.answer_max_chars),
+        "qwen_prompt_chars": 0,
+        "qwen_max_new_tokens": int(
+            assistant.config["qwen"]["max_new_tokens"]
+        ),
         "command_wav": str(out_dir / "command.wav"),
         "audio_duration_seconds": None,
         "mean_volume_dbfs": None,
@@ -270,6 +324,8 @@ def run_controlled_session(assistant: Any, args: Any) -> int:
         "new_photo_count": 0,
         "new_photo_path": "",
         "answer_chars": 0,
+        "pipeline_elapsed_seconds": None,
+        "tts_elapsed_seconds": None,
         "speak": int(not args.no_speak),
         "play": int(not args.no_play),
         "elapsed_seconds": None,
@@ -381,8 +437,31 @@ def run_controlled_session(assistant: Any, args: Any) -> int:
 
         summary["recognized_text"] = recognized_text
         summary["recognized_chars"] = len(recognized_text)
+
+        original_intent = assistant.intent.analyze(
+            recognized_text
+        )
+
         summary["photo_intent_hint"] = int(
-            _photo_intent_hint(recognized_text)
+            original_intent.need_photo
+        )
+
+        intent_debug = {
+            "recognized_text": recognized_text,
+            "need_photo": bool(original_intent.need_photo),
+            "intent_qwen_text": original_intent.qwen_text,
+            "heuristic_photo_hint": bool(
+                _photo_intent_hint(recognized_text)
+            ),
+        }
+
+        (out_dir / "intent_debug.json").write_text(
+            json.dumps(
+                intent_debug,
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
         )
 
         _write_text(recognized_text_path, recognized_text + "\n")
@@ -402,15 +481,117 @@ def run_controlled_session(assistant: Any, args: Any) -> int:
             "INTENT_DISPATCH",
             f"photo_hint={summary['photo_intent_hint']}",
         )
-        _state(out_dir, "QWEN_TTS")
+
+        prompt_text = recognized_text
+        request_max_new_tokens = None
+
+        if args.answer_mode == "concise":
+            answer_max_chars = max(
+                20,
+                int(args.answer_max_chars),
+            )
+            request_max_new_tokens = max(
+                32,
+                int(args.concise_max_new_tokens),
+            )
+
+            if summary["photo_intent_hint"]:
+                prompt_text = (
+                    "请根据当前摄像头拍摄的图片，"
+                    "直接描述画面中最主要的人物、物体和场景。"
+                    "只输出一到两句中文结论，"
+                    "不要解释推理过程，"
+                    "不要使用标题、列表或分点，"
+                    "不要说无法查看图片，"
+                    f"尽量控制在{answer_max_chars}个汉字以内。"
+                )
+            else:
+                prompt_text = _build_concise_text_prompt(
+                    recognized_text,
+                    answer_max_chars,
+                )
+
+        if request_max_new_tokens is None:
+            effective_max_new_tokens = int(
+                assistant.config["qwen"]["max_new_tokens"]
+            )
+        else:
+            effective_max_new_tokens = int(
+                request_max_new_tokens
+            )
+
+        summary["qwen_max_new_tokens"] = (
+            effective_max_new_tokens
+        )
+        summary["qwen_prompt_chars"] = len(prompt_text)
+        _write_text(out_dir / "qwen_prompt.txt", prompt_text + "\n")
+
+        _state(
+            out_dir,
+            "QWEN_PIPELINE_START",
+            (
+                f"answer_mode={args.answer_mode}, "
+                f"max_new_tokens={effective_max_new_tokens}"
+            ),
+        )
+
+        pipeline_start = time.monotonic()
 
         answer = assistant.run_once_from_text(
-            recognized_text,
-            speak=not args.no_speak,
-            play=not args.no_play,
+            prompt_text,
+            speak=False,
+            play=False,
+            max_new_tokens=request_max_new_tokens,
+            need_photo_override=bool(
+                summary["photo_intent_hint"]
+            ),
+        )
+
+        summary["pipeline_elapsed_seconds"] = (
+            time.monotonic() - pipeline_start
         )
 
         answer = str(answer or "").strip()
+
+        _state(
+            out_dir,
+            "QWEN_PIPELINE_DONE",
+            (
+                f"elapsed={summary['pipeline_elapsed_seconds']:.3f}s, "
+                f"answer_chars={len(answer)}"
+            ),
+        )
+
+        if not args.no_speak and not args.no_play and answer:
+            from .streaming_tts import StreamingTtsPlayer
+
+            _state(
+                out_dir,
+                "TTS_START",
+                f"answer_chars={len(answer)}",
+            )
+
+            tts_start = time.monotonic()
+            player = StreamingTtsPlayer(assistant.config)
+
+            try:
+                player.enqueue(answer)
+            finally:
+                player.close()
+
+            summary["tts_elapsed_seconds"] = (
+                time.monotonic() - tts_start
+            )
+
+            _state(
+                out_dir,
+                "TTS_DONE",
+                f"elapsed={summary['tts_elapsed_seconds']:.3f}s",
+            )
+        else:
+            summary["tts_elapsed_seconds"] = 0.0
+            _state(out_dir, "TTS_SKIPPED")
+
         summary["answer_chars"] = len(answer)
         _write_text(answer_path, answer + "\n")
 
