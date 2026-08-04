@@ -126,3 +126,86 @@ intent:
     - "ocr"
   image_prefix_trigger: 图片
   image_prefix: <图片>
+  # BEGIN EXP11 FORMAL INTENT RULES
+  # photo_keywords is retained for backward compatibility.
+  # Camera routing is decided by the structured rules below.
+  explicit_capture_phrases:
+    - 拍照
+    - 拍一张
+    - 照一张
+    - 拍个照
+    - 拍一下
+    - 拍下来
+    - 拍张图
+    - 拍张照片
+    - 拍一张照片
+    - 拍个照片
+    - 拍个图片
+
+  direct_visual_commands:
+    - 看镜头
+    - 看画面
+    - 看摄像头
+    - 看图片
+    - 看照片
+    - 看图像
+    - 看看镜头
+    - 看看画面
+
+  visual_context_phrases:
+    - 摄像头
+    - 当前摄像头
+    - 镜头
+    - 镜头里
+    - 画面
+    - 当前画面
+    - 实时画面
+    - 画面里
+    - 照片
+    - 照片里
+    - 图片
+    - 图片里
+    - 图像
+    - 眼前
+    - 当前视野
+    - 视野里
+    - 现在看到
+    - 当前看到
+
+  visual_action_phrases:
+    - 看一下
+    - 看看
+    - 看一看
+    - 帮我看
+    - 帮我看看
+    - 看下
+    - 看一眼
+    - 你看
+    - 描述一下
+    - 描述
+    - 识别一下
+    - 识别
+    - 辨认
+    - 读一下
+    - 念一下
+    - 有什么
+    - 有哪些
+    - 多少个
+    - 几个
+    - 颜色
+    - 文字
+
+  text_context_blockers:
+    - 代码
+    - 源码
+    - 算法
+    - 原理
+    - 教程
+    - 格式
+    - 文件
+    - 模型
+    - 论文
+    - 程序
+    - 编程
+    - 数据结构
+  # END EXP11 FORMAL INTENT RULES
