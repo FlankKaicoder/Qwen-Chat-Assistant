@@ -28,8 +28,24 @@ TEXT_TEXT = (
     "只用一句中文简短回答。"
 )
 
-ROUND_COUNT = 10
-MAX_NEW_TOKENS = 96
+ROUND_COUNT = int(
+    os.environ.get(
+        "EXP12_ROUND_COUNT",
+        "10",
+    )
+)
+
+MAX_NEW_TOKENS = int(
+    os.environ.get(
+        "EXP12_MAX_NEW_TOKENS",
+        "96",
+    )
+)
+
+OUTPUT_PREFIX = os.environ.get(
+    "EXP12_OUTPUT_PREFIX",
+    "exp12_2_same_process_lifecycle",
+)
 
 
 def mem_available_kb() -> int:
@@ -181,7 +197,7 @@ def main() -> int:
     out_dir = (
         PROJECT_DIR
         / "output"
-        / f"exp12_2_same_process_lifecycle_{timestamp}"
+        / f"{OUTPUT_PREFIX}_{timestamp}"
     )
     out_dir.mkdir(parents=True)
 
