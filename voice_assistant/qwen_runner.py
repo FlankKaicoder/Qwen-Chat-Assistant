@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import signal
+
 import os
 import re
 import time
@@ -145,9 +147,66 @@ class QwenRunner:
 
     @staticmethod
     def _close_child(child: pexpect.spawn) -> None:
+        """Close and reap the Qwen demo child process.
+
+        pexpect owns a real child process. In a long-lived parent process,
+        closing the PTY alone is not sufficient if the terminated child has
+        not been reaped. Explicit waitpid() prevents accumulation of zombie
+        demo processes.
+        """
+
+        pid = getattr(child, "pid", None)
+
+        # First let pexpect perform its normal PTY/process cleanup.
         try:
             child.close(force=True)
         except ExceptionPexpect:
+            pass
+        except OSError:
+            pass
+
+        if not pid:
+            return
+
+        # If pexpect already reaped the child, waitpid() raises
+        # ChildProcessError and cleanup is already complete.
+        deadline = time.monotonic() + 2.0
+
+        while True:
+            try:
+                waited_pid, _status = os.waitpid(
+                    pid,
+                    os.WNOHANG,
+                )
+            except ChildProcessError:
+                return
+            except OSError:
+                return
+
+            if waited_pid == pid:
+                return
+
+            if time.monotonic() >= deadline:
+                break
+
+            time.sleep(0.05)
+
+        # Defensive fallback:
+        # the child should normally already be dead at this point.
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        except OSError:
+            pass
+
+        # Blocking wait is safe after SIGKILL and ensures that a direct child
+        # cannot remain as a zombie owned by this Python process.
+        try:
+            os.waitpid(pid, 0)
+        except ChildProcessError:
+            pass
+        except OSError:
             pass
 
     @staticmethod
